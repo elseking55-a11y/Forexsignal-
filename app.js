@@ -1,7 +1,7 @@
 const WS_URLS=["wss://ws.binaryws.com/websockets/v3"];
 const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600:"H1",7200:"H2",14400:"H4",28800:"H8",43200:"H12",86400:"D1"};
 const MTF=[300,900,3600,14400];
-const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0,endpoint:0,manualClose:false,pollTimer:null};
+const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0,endpoint:0,manualClose:false,pollTimer:null,marketSub:false};
 const $=id=>document.getElementById(id);
 const els={symbol:$("symbol"),start:$("start"),stop:$("stop"),dataStatus:$("dataStatus"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary"),checklist:$("checklist")};
 function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}
@@ -35,7 +35,7 @@ function connect(){
    }
   },5000);
  };
- state.ws.onclose=()=>{
+ state.ws.onclose=()=>{state.marketSub=false;
   state.connected=false;state.connecting=false;
   state.endpoint=(state.endpoint+1)%WS_URLS.length;
   els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";
@@ -64,10 +64,10 @@ function load(){
   const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:0});
   if(id)state.reqTf[id]=tf;
  });
- state.marketReq=send({ticks:state.symbol,subscribe:1});
+ if(!state.marketSub){state.marketReq=send({ticks:state.symbol,subscribe:1});state.marketSub=true;}
  send({ping:1});
  const ss=state.symbols.find(x=>x.symbol===state.symbol);
- els.marketTitle.textContent=ss?.display_name||state.symbol;
+ els.marketTitle.textContent=ss?.name||ss?.display_name||state.symbol;
  els.tfTitle.textContent=tfName(state.tf);
  if(state.dataTimer)clearTimeout(state.dataTimer);
  state.dataTimer=setTimeout(()=>{
