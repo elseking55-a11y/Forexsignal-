@@ -3,7 +3,7 @@ const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600
 const MTF=[300,900,3600,14400];
 const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{}};
 const $=id=>document.getElementById(id);
-const els={symbol:$("symbol"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary")};
+const els={symbol:$("symbol"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary"),checklist:$("checklist")};
 function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}}
 function connect(){if(state.ws)try{state.ws.close()}catch{}state.ws=new WebSocket(WS_URL);state.ws.onopen=()=>{els.connection.className="status live";els.connection.innerHTML="<span></span> DERIV LIVE";send({active_symbols:"brief",product_type:"basic"})};state.ws.onclose=()=>{els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";setTimeout(connect,2500)};state.ws.onerror=()=>{els.connection.className="status error";els.connection.innerHTML="<span></span> CONNECTION ERROR"};state.ws.onmessage=e=>handle(JSON.parse(e.data))}
 function handle(d){
@@ -41,11 +41,27 @@ function renderMTF(){
  const rows=MTF.map(tf=>{const s=structure(state.mtf[tf]);return '<tr><td><b>'+tfName(tf)+'</b></td><td><span class="badge '+s.state.toLowerCase()+'">'+s.state+'</span></td><td>'+ (s.bosBull&&!s.bosBear?"BOS ↑":s.bosBear&&!s.bosBull?"BOS ↓":"—") +'</td><td>'+ (s.rsi===50?"—":s.rsi.toFixed(1)) +'</td><td>'+ (s.atr?fmt(s.atr):"—") +'</td></tr>'}).join("");
  els.mtfBody.innerHTML=rows;
 }
+function renderChecklist(data,overall,base,sig){
+ const macro=data.find(x=>x.tf===14400)?.s||structure(state.mtf[14400]);
+ const h1=data.find(x=>x.tf===3600)?.s||structure(state.mtf[3600]);
+ const m15=data.find(x=>x.tf===900)?.s||structure(state.mtf[900]);
+ const m5=data.find(x=>x.tf===300)?.s||structure(state.mtf[300]);
+ const items=[
+  ["H4 macro bias",macro.state,overall!=="MIXED"&&macro.state===overall],
+  ["H1 structure",h1.state,h1.state===overall],
+  ["M15 setup",m15.state,m15.state===overall],
+  ["M5 entry timing",m5.state,m5.state===overall],
+  ["Swing break",base.bosBull?"BOS ↑":base.bosBear?"BOS ↓":"NO BREAK",sig==="BUY"?base.bosBull:sig==="SELL"?base.bosBear:false],
+  ["RSI",base.rsi.toFixed(1),sig!=="WAIT"&&(sig==="BUY"?base.rsi<70:base.rsi>30)]
+ ];
+ els.checklist.innerHTML=items.map(([name,value,ok])=>'<div class="check-item"><span>'+esc(name)+'</span><b class="check '+(ok?"pass":"hold")+'">'+(ok?"✓":"•")+' '+esc(value)+'</b></div>').join("");
+}
 function analyzeMTF(){
- const data=MTF.map(tf=>structure(state.mtf[tf])).filter(x=>x.state!=="WAIT");if(data.length<2)return;
- const score=data.reduce((a,x)=>a+x.score,0),bull=data.filter(x=>x.state==="BULLISH").length,bear=data.filter(x=>x.state==="BEARISH").length;
+ const data=MTF.map(tf=>({tf,s:structure(state.mtf[tf])})).filter(x=>x.s.state!=="WAIT");if(data.length<2)return;
+ const score=data.reduce((a,x)=>a+x.s.score,0),bull=data.filter(x=>x.s.state==="BULLISH").length,bear=data.filter(x=>x.s.state==="BEARISH").length;
  const overall=score>=2?"BULLISH":score<=-2?"BEARISH":"MIXED";els.mtfSummary.textContent=overall+" · "+bull+" bullish / "+bear+" bearish · M5 + M15 + H1 + H4";
  const base=structure(state.mtf[state.tf]);if(base.state==="WAIT")return;
+ renderChecklist(data,overall,base,sig);
  const price=state.tick||base.price,A=base.atr||Math.max(price*.001,1),sig=overall==="BULLISH"&&base.state!=="BEARISH"?"BUY":overall==="BEARISH"&&base.state!=="BULLISH"?"SELL":"WAIT";
  const dir=sig==="SELL"?-1:1,buffer=A*.65,entry=sig==="BUY"?[price-buffer*.5,price+buffer*.15]:sig==="SELL"?[price-buffer*.15,price+buffer*.5]:[Math.min(base.sup+buffer,price),Math.max(base.res-buffer,price)];
  let why="Multi-timeframe structure is mixed; wait for alignment.";if(sig==="BUY")why="M5, M15, H1 and H4 structure currently lean bullish. Use lower-timeframe confirmation near the entry zone and respect H4 resistance.";if(sig==="SELL")why="M5, M15, H1 and H4 structure currently lean bearish. Use lower-timeframe confirmation near the entry zone and respect H4 support.";
