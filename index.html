@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#081018"><title>ELISY254 AI Market Analyst</title><link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="topbar"><div><div class="brand">ELISY254</div><div class="sub">AI MARKET ANALYST</div></div><div id="connection" class="status"><span></span> CONNECTING</div></header>
+<main>
+<section class="controls panel"><label>MARKET<select id="symbol"></select></label><div class="timeframes" id="timeframes"><button data-tf="300" class="active">M5</button><button data-tf="900">M15</button><button data-tf="3600">H1</button><button data-tf="14400">H4</button></div><button id="refresh" class="secondary">Refresh</button></section>
+<section class="price-row"><div class="price-card panel"><div class="eyebrow">LIVE PRICE</div><div id="price">—</div><div id="updated">Waiting for Deriv…</div></div><div class="signal-card panel" id="signalCard"><div class="eyebrow">ANALYSIS STATE</div><div id="signal">WAIT</div><div id="confidence">Calculating market structure</div></div></section>
+<section class="chart panel"><div class="section-head"><strong id="marketTitle">Market</strong><span id="tfTitle">M5</span></div><canvas id="chart"></canvas></section>
+<section class="grid"><article class="panel"><div class="section-head"><strong>MARKET STRUCTURE</strong></div><div class="metrics"><div><span>Trend</span><b id="trend">—</b></div><div><span>Momentum</span><b id="momentum">—</b></div><div><span>RSI</span><b id="rsi">—</b></div><div><span>ATR</span><b id="atr">—</b></div></div></article>
+<article class="panel"><div class="section-head"><strong>KEY LEVELS</strong></div><div class="levels"><div><span>Resistance</span><b id="resistance">—</b></div><div><span>Entry zone</span><b id="entry">—</b></div><div><span>Support</span><b id="support">—</b></div></div></article></section>
+<section class="panel explanation"><div class="section-head"><strong>AI ANALYSIS</strong><span id="risk">RISK: —</span></div><p id="reason">Waiting for live candles.</p><div class="trade-levels"><div><span>Invalidation</span><b id="invalidation">—</b></div><div><span>TP1</span><b id="tp1">—</b></div><div><span>TP2</span><b id="tp2">—</b></div><div><span>TP3</span><b id="tp3">—</b></div></div></section>
+<section class="panel note"><strong>How this works</strong><p>Live Deriv candles are analyzed locally using trend, EMA, RSI, ATR, swing structure and support/resistance. The engine can return BUY, SELL or WAIT; it does not guarantee an outcome and it does not place trades.</p></section>
+</main><script src="./app.js"></script>
+</body></html>
