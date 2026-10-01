@@ -1,10 +1,12 @@
 const WS_URL="wss://ws.binaryws.com/websockets/v3";
 const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600:"H1",7200:"H2",14400:"H4",28800:"H8",43200:"H12",86400:"D1"};
 const MTF=[300,900,3600,14400];
-const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null};
+const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0};
 const $=id=>document.getElementById(id);
 const els={symbol:$("symbol"),start:$("start"),stop:$("stop"),dataStatus:$("dataStatus"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary"),checklist:$("checklist")};
-function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}\nfunction setStatus(msg){els.dataStatus.textContent=msg}\nfunction markLive(msg){state.connected=true;els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";setStatus(msg)}
+function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}
+function setStatus(msg){els.dataStatus.textContent=msg}
+function markLive(msg){state.connected=true;els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";setStatus(msg)}
 function showError(msg){els.dataStatus.textContent="DERIV ERROR · "+msg;els.connection.className="status error";els.connection.innerHTML="<span></span> DERIV ERROR"}
 function connect(){
  if(!state.running)return;
@@ -15,7 +17,7 @@ function connect(){
  setStatus("CONNECTING TO DERIV MARKET DATA…");
  try{state.ws=new WebSocket(WS_URL)}catch(e){showError("WEBSOCKET START FAILED");return}
  state.ws.onopen=()=>{
-  state.connected=true;state.connecting=false;
+  state.connected=true;state.connecting=false;state.reconnectAttempt=0;
   els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";
   setStatus("DERIV CONNECTED · LOADING MARKET DATA…");
   send({active_symbols:"brief"});
@@ -34,7 +36,7 @@ function connect(){
   els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";
   if(state.running){
    setStatus("DERIV DISCONNECTED · RECONNECTING…");
-   state.reconnectTimer=setTimeout(connect,1500);
+   state.reconnectAttempt=Math.min(state.reconnectAttempt+1,6);const delay=Math.min(1000*Math.pow(2,state.reconnectAttempt-1),10000);state.reconnectTimer=setTimeout(connect,delay);
   }else setStatus("ANALYSIS STOPPED");
  };
  state.ws.onerror=()=>{showError("WEBSOCKET CONNECTION FAILED · RETRYING…")};
@@ -67,7 +69,7 @@ function load(){
   if(state.running){
    const got=MTF.filter(tf=>state.mtf[tf]?.length).map(tf=>tfName(tf)).join(" · ");
    setStatus(got?"LIVE DATA · RECEIVED "+got:"CONNECTED · MARKET DATA DELAYED · RETRYING…");
-   if(!got)load();
+   if(!got&&state.ws?.readyState===1){send({active_symbols:"brief"});load()}else if(!got&&state.running){connect();}
   }
  },7000);
 }
@@ -110,7 +112,11 @@ function renderChecklist(data,overall,base,sig){
 }
 function analyzeMTF(){
  const data=MTF.map(tf=>({tf,s:structure(state.mtf[tf])})).filter(x=>x.s.state!=="WAIT");
- if(data.length<4){\n  const got=data.map(x=>tfName(x.tf)).join(" · ");\n  setStatus(got?"LIVE DATA · "+got+" · WAITING FOR OTHER TIMEFRAMES…":"CONNECTED · WAITING FOR CANDLES…");\n  return;\n}
+ if(data.length<4){
+  const got=data.map(x=>tfName(x.tf)).join(" · ");
+  setStatus(got?"LIVE DATA · "+got+" · WAITING FOR OTHER TIMEFRAMES…":"CONNECTED · WAITING FOR CANDLES…");
+  return;
+}
  const h4=data.find(x=>x.tf===14400)?.s;
  const h1=data.find(x=>x.tf===3600)?.s;
  const m15=data.find(x=>x.tf===900)?.s;
@@ -146,5 +152,5 @@ function draw(){const c=els.chart,ctx=c.getContext("2d"),d=devicePixelRatio||1,w
 document.querySelectorAll("#timeframes button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#timeframes button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.tf=+b.dataset.tf;els.tfTitle.textContent=tfName(state.tf);if(state.running)load()});
 els.symbol.onchange=()=>{if(state.running)load()};
 els.start.onclick=()=>{state.running=true;els.start.disabled=true;els.stop.disabled=false;setStatus("CONNECTING TO DERIV…");connect()};
-els.stop.onclick=()=>{state.running=false;state.connecting=false;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
+els.stop.onclick=()=>{state.running=false;state.connecting=false;state.reconnectAttempt=0;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
 $("refresh").onclick=()=>{if(state.running)load()};window.addEventListener("resize",draw);setInterval(()=>{if(state.running&&state.ws?.readyState===1)send({ping:1})},30000);
