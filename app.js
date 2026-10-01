@@ -1,4 +1,4 @@
-const WS_URLS=["wss://ws.derivws.com/websockets/v3?app_id=1089","wss://ws.binaryws.com/websockets/v3?app_id=1089"];
+const WS_URLS=["wss://ws.binaryws.com/websockets/v3"];
 const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600:"H1",7200:"H2",14400:"H4",28800:"H8",43200:"H12",86400:"D1"};
 const MTF=[300,900,3600,14400];
 const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0,endpoint:0,manualClose:false};
