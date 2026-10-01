@@ -26,6 +26,7 @@ function connect(){
   setStatus("DERIV CONNECTED · LOADING MARKET DATA…");
   send({active_symbols:"brief"});
   send({ping:1});
+  startPolling();
   if(state.dataTimer)clearTimeout(state.dataTimer);
   state.dataTimer=setTimeout(()=>{
    if(state.running&&(!state.symbols.length||!Object.keys(state.mtf).length)){
@@ -35,7 +36,7 @@ function connect(){
    }
   },5000);
  };
- state.ws.onclose=()=>{state.marketSub=false;
+ state.ws.onclose=()=>{state.marketSub=false;state.marketSubId=null;
   state.connected=false;state.connecting=false;
   state.endpoint=(state.endpoint+1)%WS_URLS.length;
   els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";
@@ -44,13 +45,14 @@ function connect(){
    state.reconnectAttempt=Math.min(state.reconnectAttempt+1,6);const delay=Math.min(1000*Math.pow(2,state.reconnectAttempt-1),10000);state.reconnectTimer=setTimeout(connect,delay);
   }else setStatus("ANALYSIS STOPPED");
  };
- state.ws.onerror=()=>{state.endpoint=(state.endpoint+1)%WS_URLS.length;setStatus("DERIV CONNECTION FAILED · SWITCHING CONNECTION…");try{state.ws.close()}catch{}};
+ state.ws.onerror=()=>{setStatus("DERIV CONNECTION FAILED · RETRYING…");};
  state.ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){showError("INVALID DERIV RESPONSE")}};
 }
 function handle(d){
  if(d.error){showError(d.error.message||d.error.code||"REQUEST REJECTED");return}
  if(d.msg_type==="active_symbols"){state.symbols=(d.active_symbols||[]).map(s=>({...s,symbol:s.symbol||s.underlying_symbol,name:s.display_name||s.underlying_symbol_name||s.symbol||s.underlying_symbol})).filter(s=>s.symbol);const preferred=state.symbols.find(s=>/gold|xau/i.test(s.name+" "+s.symbol))||state.symbols.find(s=>/eur\/?usd|frxEURUSD/i.test(s.name+" "+s.symbol))||state.symbols.find(s=>/usd/i.test(s.symbol));const wanted=state.symbols.filter(s=>/gold|xau|eur\/?usd|frxEURUSD/i.test(s.name+" "+s.symbol));const list=wanted.length?wanted:state.symbols;els.symbol.innerHTML=list.map(s=>'<option value="'+esc(s.symbol)+'">'+esc(s.name)+'</option>').join("");if(preferred&&list.some(x=>x.symbol===preferred.symbol))els.symbol.value=preferred.symbol;else if(list[0])els.symbol.value=list[0].symbol;els.dataStatus.textContent="MARKETS LOADED · "+list.length+" AVAILABLE";if(state.running)load()}
  if(d.msg_type==="candles"){const tf=state.reqTf[d.req_id]||state.subTf[d.subscription?.id];if(tf){const candles=(d.candles||[]).map(c=>({t:+c.epoch,o:+c.open,h:+c.high,l:+c.low,c:+c.close}));if(candles.length){state.mtf[tf]=candles;if(tf===state.tf){state.candles=candles;draw()}els.dataStatus.textContent="LIVE DATA · "+tfName(tf)+" UPDATED";renderMTF();analyzeMTF()}}if(d.subscription?.id&&tf)state.subTf[d.subscription.id]=tf}
+ if(d.msg_type==="tick"&&d.subscription?.id)state.marketSubId=d.subscription.id;
  if(d.msg_type==="ohlc"){const tf=state.reqTf[d.req_id]||state.subTf[d.ohlc?.subscription?.id];if(tf&&d.ohlc){const q=d.ohlc,c=state.mtf[tf]||[];const item={t:+q.epoch,o:+q.open,h:+q.high,l:+q.low,c:+q.close};if(c.length&&c.at(-1).t===item.t)c[c.length-1]=item;else c.push(item);state.mtf[tf]=c.slice(-180);if(tf===state.tf){state.candles=state.mtf[tf];draw()}renderMTF();analyzeMTF()}}
  if(d.msg_type==="tick"&&d.tick){state.tick=+d.tick.quote;els.dataStatus.textContent="LIVE · "+(state.symbols.find(x=>x.symbol===state.symbol)?.name||state.symbol||"MARKET")+" · TICK RECEIVED";els.price.textContent=fmt(state.tick);els.updated.textContent=new Date(d.tick.epoch*1000).toLocaleTimeString();if(state.candles.length)draw();analyzeMTF()}
 }
@@ -59,12 +61,14 @@ function load(){
  state.symbol=els.symbol.value;if(!state.symbol){setStatus("CONNECTED · SELECTING MARKET…");return}
  const marketName=state.symbols.find(x=>x.symbol===state.symbol)?.name||state.symbol;
  setStatus("CONNECTED · REQUESTING "+marketName+" M1–H4 DATA…");
- state.candles=[];state.mtf={};state.reqTf={};state.subTf={};
+ state.reqTf={};state.subTf={};
  MTF.forEach(tf=>{
   const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:0});
   if(id)state.reqTf[id]=tf;
  });
- if(!state.marketSub){state.marketReq=send({ticks:state.symbol,subscribe:1});state.marketSub=true;}
+ if(state.marketSubId&&state.ws?.readyState===1){send({forget:state.marketSubId});state.marketSub=false;state.marketSubId=null;}
+ state.marketReq=send({ticks:state.symbol,subscribe:1});
+ state.marketSub=true;
  send({ping:1});
  const ss=state.symbols.find(x=>x.symbol===state.symbol);
  els.marketTitle.textContent=ss?.name||ss?.display_name||state.symbol;
@@ -158,5 +162,5 @@ function draw(){const c=els.chart,ctx=c.getContext("2d"),d=devicePixelRatio||1,w
 document.querySelectorAll("#timeframes button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#timeframes button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.tf=+b.dataset.tf;els.tfTitle.textContent=tfName(state.tf);if(state.running)load()});
 els.symbol.onchange=()=>{if(state.running)load()};
 els.start.onclick=()=>{state.running=true;els.start.disabled=true;els.stop.disabled=false;setStatus("CONNECTING TO DERIV…");connect()};
-els.stop.onclick=()=>{state.running=false;state.connecting=false;state.reconnectAttempt=0;state.manualClose=true;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);if(state.pollTimer)clearInterval(state.pollTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
+els.stop.onclick=()=>{state.running=false;state.connecting=false;state.reconnectAttempt=0;state.manualClose=true;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);if(state.pollTimer)clearInterval(state.pollTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.marketSubId&&state.ws?.readyState===1)send({forget:state.marketSubId});state.marketSub=false;state.marketSubId=null;if(state.ws)try{state.ws.close()}catch{}state.ws=null};
 $("refresh").onclick=()=>{if(state.running)load()};window.addEventListener("resize",draw);setInterval(()=>{if(state.running&&state.ws?.readyState===1)send({ping:1})},30000);setTimeout(()=>{if(!state.running){state.running=true;els.start.disabled=true;els.stop.disabled=false;setStatus("STARTING LIVE DERIV MARKET DATA…");connect()}},50);
