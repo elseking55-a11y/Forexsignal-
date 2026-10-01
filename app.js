@@ -1,7 +1,7 @@
-const WS_URL="wss://ws.binaryws.com/websockets/v3";
+const WS_URLS=["wss://ws.binaryws.com/websockets/v3","wss://ws.derivws.com/websockets/v3"];
 const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600:"H1",7200:"H2",14400:"H4",28800:"H8",43200:"H12",86400:"D1"};
 const MTF=[300,900,3600,14400];
-const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0};
+const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null,reconnectAttempt:0,endpoint:0,manualClose:false};
 const $=id=>document.getElementById(id);
 const els={symbol:$("symbol"),start:$("start"),stop:$("stop"),dataStatus:$("dataStatus"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary"),checklist:$("checklist")};
 function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}
@@ -10,12 +10,16 @@ function markLive(msg){state.connected=true;els.connection.className="status liv
 function showError(msg){els.dataStatus.textContent="DERIV ERROR · "+msg;els.connection.className="status error";els.connection.innerHTML="<span></span> DERIV ERROR"}
 function connect(){
  if(!state.running)return;
+ if(state.connecting)return;
  if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}
  if(state.ws)try{state.ws.onclose=null;state.ws.close()}catch{}
  state.connected=false;state.connecting=true;
+ state.manualClose=false;
  els.connection.className="status";els.connection.innerHTML="<span></span> CONNECTING TO DERIV";
  setStatus("CONNECTING TO DERIV MARKET DATA…");
- try{state.ws=new WebSocket(WS_URL)}catch(e){showError("WEBSOCKET START FAILED");return}
+ try{state.ws=new WebSocket(WS_URLS[state.endpoint%WS_URLS.length])}catch(e){
+  state.connecting=false;state.endpoint=(state.endpoint+1)%WS_URLS.length;setStatus("DERIV CONNECTION RETRY…");state.reconnectTimer=setTimeout(connect,1000);return
+}
  state.ws.onopen=()=>{
   state.connected=true;state.connecting=false;state.reconnectAttempt=0;
   els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";
@@ -33,13 +37,14 @@ function connect(){
  };
  state.ws.onclose=()=>{
   state.connected=false;state.connecting=false;
+  state.endpoint=(state.endpoint+1)%WS_URLS.length;
   els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";
   if(state.running){
    setStatus("DERIV DISCONNECTED · RECONNECTING…");
    state.reconnectAttempt=Math.min(state.reconnectAttempt+1,6);const delay=Math.min(1000*Math.pow(2,state.reconnectAttempt-1),10000);state.reconnectTimer=setTimeout(connect,delay);
   }else setStatus("ANALYSIS STOPPED");
  };
- state.ws.onerror=()=>{showError("WEBSOCKET CONNECTION FAILED · RETRYING…")};
+ state.ws.onerror=()=>{state.endpoint=(state.endpoint+1)%WS_URLS.length;setStatus("DERIV CONNECTION FAILED · SWITCHING CONNECTION…");try{state.ws.close()}catch{}};
  state.ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){showError("INVALID DERIV RESPONSE")}};
 }
 function handle(d){
@@ -152,5 +157,5 @@ function draw(){const c=els.chart,ctx=c.getContext("2d"),d=devicePixelRatio||1,w
 document.querySelectorAll("#timeframes button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#timeframes button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.tf=+b.dataset.tf;els.tfTitle.textContent=tfName(state.tf);if(state.running)load()});
 els.symbol.onchange=()=>{if(state.running)load()};
 els.start.onclick=()=>{state.running=true;els.start.disabled=true;els.stop.disabled=false;setStatus("CONNECTING TO DERIV…");connect()};
-els.stop.onclick=()=>{state.running=false;state.connecting=false;state.reconnectAttempt=0;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
+els.stop.onclick=()=>{state.running=false;state.connecting=false;state.reconnectAttempt=0;state.manualClose=true;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
 $("refresh").onclick=()=>{if(state.running)load()};window.addEventListener("resize",draw);setInterval(()=>{if(state.running&&state.ws?.readyState===1)send({ping:1})},30000);
