@@ -61,7 +61,7 @@ function load(){
  setStatus("CONNECTED · REQUESTING "+marketName+" M1–H4 DATA…");
  state.candles=[];state.mtf={};state.reqTf={};state.subTf={};
  MTF.forEach(tf=>{
-  const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:1});
+  const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:0});
   if(id)state.reqTf[id]=tf;
  });
  state.marketReq=send({ticks:state.symbol,subscribe:1});
@@ -78,7 +78,8 @@ function load(){
   }
  },7000);
 }
-function startPolling(){if(state.pollTimer)clearInterval(state.pollTimer);state.pollTimer=setInterval(()=>{if(state.running&&state.connected)load()},10000)}\nfunction tfName(v){return TF[v]||String(v)+"s"}
+function startPolling(){if(state.pollTimer)clearInterval(state.pollTimer);state.pollTimer=setInterval(()=>{if(state.running&&state.connected)load()},10000)}
+function tfName(v){return TF[v]||String(v)+"s"}
 function fmt(v){return Number(v).toLocaleString(undefined,{maximumFractionDigits:5})}
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function ema(a,n){if(!a.length)return 0;const k=2/(n+1);let e=a[0];for(let i=1;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
