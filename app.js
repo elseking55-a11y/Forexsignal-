@@ -1,12 +1,45 @@
 const WS_URL="wss://ws.binaryws.com/websockets/v3";
 const TF={60:"M1",120:"M2",180:"M3",300:"M5",600:"M10",900:"M15",1800:"M30",3600:"H1",7200:"H2",14400:"H4",28800:"H8",43200:"H12",86400:"D1"};
 const MTF=[300,900,3600,14400];
-const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false};
+const state={ws:null,symbol:null,tf:300,candles:[],tick:null,req:0,symbols:[],mtf:{},reqTf:{},subTf:{},running:false,connected:false,connecting:false,reconnectTimer:null,dataTimer:null};
 const $=id=>document.getElementById(id);
 const els={symbol:$("symbol"),start:$("start"),stop:$("stop"),dataStatus:$("dataStatus"),price:$("price"),updated:$("updated"),signal:$("signal"),confidence:$("confidence"),trend:$("trend"),momentum:$("momentum"),rsi:$("rsi"),atr:$("atr"),resistance:$("resistance"),support:$("support"),entry:$("entry"),reason:$("reason"),invalidation:$("invalidation"),tp1:$("tp1"),tp2:$("tp2"),tp3:$("tp3"),risk:$("risk"),chart:$("chart"),marketTitle:$("marketTitle"),tfTitle:$("tfTitle"),signalCard:$("signalCard"),connection:$("connection"),mtfBody:$("mtfBody"),mtfSummary:$("mtfSummary"),checklist:$("checklist")};
-function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}
+function send(p){if(state.ws?.readyState===1){const req_id=++state.req;state.ws.send(JSON.stringify({...p,req_id}));return req_id}return null}\nfunction setStatus(msg){els.dataStatus.textContent=msg}\nfunction markLive(msg){state.connected=true;els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";setStatus(msg)}
 function showError(msg){els.dataStatus.textContent="DERIV ERROR · "+msg;els.connection.className="status error";els.connection.innerHTML="<span></span> DERIV ERROR"}
-function connect(){if(!state.running)return;if(state.ws)try{state.ws.close()}catch{}state.ws=new WebSocket(WS_URL);state.ws.onopen=()=>{state.connected=true;els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";els.dataStatus.textContent="CONNECTED · LOADING MARKETS…";send({active_symbols:"brief"})};state.ws.onclose=()=>{state.connected=false;els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";if(state.running){els.dataStatus.textContent="DERIV DISCONNECTED · RECONNECTING…";setTimeout(connect,2500)}else els.dataStatus.textContent="ANALYSIS STOPPED"};state.ws.onerror=()=>{showError("WEBSOCKET CONNECTION FAILED")};state.ws.onmessage=e=>handle(JSON.parse(e.data))}
+function connect(){
+ if(!state.running)return;
+ if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}
+ if(state.ws)try{state.ws.onclose=null;state.ws.close()}catch{}
+ state.connected=false;state.connecting=true;
+ els.connection.className="status";els.connection.innerHTML="<span></span> CONNECTING TO DERIV";
+ setStatus("CONNECTING TO DERIV MARKET DATA…");
+ try{state.ws=new WebSocket(WS_URL)}catch(e){showError("WEBSOCKET START FAILED");return}
+ state.ws.onopen=()=>{
+  state.connected=true;state.connecting=false;
+  els.connection.className="status live";els.connection.innerHTML="<span></span> CONNECTED TO DERIV";
+  setStatus("DERIV CONNECTED · LOADING MARKET DATA…");
+  send({active_symbols:"brief"});
+  send({ping:1});
+  if(state.dataTimer)clearTimeout(state.dataTimer);
+  state.dataTimer=setTimeout(()=>{
+   if(state.running&&(!state.symbols.length||!Object.keys(state.mtf).length)){
+    setStatus("DERIV CONNECTED · RETRYING MARKET DATA…");
+    send({active_symbols:"brief"});
+    if(state.symbol)load();
+   }
+  },5000);
+ };
+ state.ws.onclose=()=>{
+  state.connected=false;state.connecting=false;
+  els.connection.className="status";els.connection.innerHTML="<span></span> DISCONNECTED";
+  if(state.running){
+   setStatus("DERIV DISCONNECTED · RECONNECTING…");
+   state.reconnectTimer=setTimeout(connect,1500);
+  }else setStatus("ANALYSIS STOPPED");
+ };
+ state.ws.onerror=()=>{showError("WEBSOCKET CONNECTION FAILED · RETRYING…")};
+ state.ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){showError("INVALID DERIV RESPONSE")}};
+}
 function handle(d){
  if(d.error){showError(d.error.message||d.error.code||"REQUEST REJECTED");return}
  if(d.msg_type==="active_symbols"){state.symbols=(d.active_symbols||[]).map(s=>({...s,symbol:s.symbol||s.underlying_symbol,name:s.display_name||s.underlying_symbol_name||s.symbol||s.underlying_symbol})).filter(s=>s.symbol);const preferred=state.symbols.find(s=>/gold|xau/i.test(s.name+" "+s.symbol))||state.symbols.find(s=>/eur\/?usd|frxEURUSD/i.test(s.name+" "+s.symbol))||state.symbols.find(s=>/usd/i.test(s.symbol));const wanted=state.symbols.filter(s=>/gold|xau|eur\/?usd|frxEURUSD/i.test(s.name+" "+s.symbol));const list=wanted.length?wanted:state.symbols;els.symbol.innerHTML=list.map(s=>'<option value="'+esc(s.symbol)+'">'+esc(s.name)+'</option>').join("");if(preferred&&list.some(x=>x.symbol===preferred.symbol))els.symbol.value=preferred.symbol;else if(list[0])els.symbol.value=list[0].symbol;els.dataStatus.textContent="MARKETS LOADED · "+list.length+" AVAILABLE";if(state.running)load()}
@@ -15,11 +48,28 @@ function handle(d){
  if(d.msg_type==="tick"&&d.tick){state.tick=+d.tick.quote;els.dataStatus.textContent="LIVE · "+(state.symbols.find(x=>x.symbol===state.symbol)?.name||state.symbol||"MARKET")+" · TICK RECEIVED";els.price.textContent=fmt(state.tick);els.updated.textContent=new Date(d.tick.epoch*1000).toLocaleTimeString();if(state.candles.length)draw();analyzeMTF()}
 }
 function load(){
- if(!state.running)return;state.symbol=els.symbol.value;if(!state.symbol)return;els.dataStatus.textContent="LOADING "+(state.symbols.find(x=>x.symbol===state.symbol)?.name||state.symbol)+" DATA…";
+ if(!state.running||!state.connected)return;
+ state.symbol=els.symbol.value;if(!state.symbol){setStatus("CONNECTED · SELECTING MARKET…");return}
+ const marketName=state.symbols.find(x=>x.symbol===state.symbol)?.name||state.symbol;
+ setStatus("CONNECTED · REQUESTING "+marketName+" M1–H4 DATA…");
  state.candles=[];state.mtf={};state.reqTf={};state.subTf={};
- MTF.forEach(tf=>{const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:1});if(id)state.reqTf[id]=tf});
- const id=send({ticks:state.symbol,subscribe:1});state.marketReq=id;send({ping:1});
- const s=state.symbols.find(x=>x.symbol===state.symbol);els.marketTitle.textContent=s?.display_name||state.symbol;els.tfTitle.textContent=tfName(state.tf);
+ MTF.forEach(tf=>{
+  const id=send({ticks_history:state.symbol,end:"latest",count:180,style:"candles",granularity:tf,subscribe:1});
+  if(id)state.reqTf[id]=tf;
+ });
+ state.marketReq=send({ticks:state.symbol,subscribe:1});
+ send({ping:1});
+ const ss=state.symbols.find(x=>x.symbol===state.symbol);
+ els.marketTitle.textContent=ss?.display_name||state.symbol;
+ els.tfTitle.textContent=tfName(state.tf);
+ if(state.dataTimer)clearTimeout(state.dataTimer);
+ state.dataTimer=setTimeout(()=>{
+  if(state.running){
+   const got=MTF.filter(tf=>state.mtf[tf]?.length).map(tf=>tfName(tf)).join(" · ");
+   setStatus(got?"LIVE DATA · RECEIVED "+got:"CONNECTED · MARKET DATA DELAYED · RETRYING…");
+   if(!got)load();
+  }
+ },7000);
 }
 function tfName(v){return TF[v]||String(v)+"s"}
 function fmt(v){return Number(v).toLocaleString(undefined,{maximumFractionDigits:5})}
@@ -60,7 +110,7 @@ function renderChecklist(data,overall,base,sig){
 }
 function analyzeMTF(){
  const data=MTF.map(tf=>({tf,s:structure(state.mtf[tf])})).filter(x=>x.s.state!=="WAIT");
- if(data.length<4)return;
+ if(data.length<4){\n  const got=data.map(x=>tfName(x.tf)).join(" · ");\n  setStatus(got?"LIVE DATA · "+got+" · WAITING FOR OTHER TIMEFRAMES…":"CONNECTED · WAITING FOR CANDLES…");\n  return;\n}
  const h4=data.find(x=>x.tf===14400)?.s;
  const h1=data.find(x=>x.tf===3600)?.s;
  const m15=data.find(x=>x.tf===900)?.s;
@@ -95,6 +145,6 @@ function analyzeMTF(){
 function draw(){const c=els.chart,ctx=c.getContext("2d"),d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;ctx.scale(d,d);ctx.clearRect(0,0,w,h);const cs=state.candles.slice(-70);if(!cs.length)return;const min=Math.min(...cs.map(x=>x.l)),max=Math.max(...cs.map(x=>x.h)),pad=(max-min)*.08||1,lo=min-pad,hi=max+pad,x=i=>18+i*(w-36)/Math.max(cs.length-1,1),y=p=>h-20-(p-lo)/(hi-lo)*(h-35);ctx.strokeStyle="#172630";ctx.lineWidth=1;for(let i=0;i<6;i++){const yy=18+i*(h-38)/5;ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(w,yy);ctx.stroke()}cs.forEach((q,i)=>{const xx=x(i),cw=Math.max(3,(w-45)/cs.length*.62);ctx.strokeStyle=q.c>=q.o?"#3eb6a4":"#df6969";ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.moveTo(xx,y(q.h));ctx.lineTo(xx,y(q.l));ctx.stroke();const top=y(Math.max(q.o,q.c)),bot=y(Math.min(q.o,q.c));ctx.fillRect(xx-cw/2,top,cw,Math.max(1,bot-top))});if(state.tick){ctx.strokeStyle="#6f8290";ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(0,y(state.tick));ctx.lineTo(w,y(state.tick));ctx.stroke();ctx.setLineDash([])}}
 document.querySelectorAll("#timeframes button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#timeframes button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.tf=+b.dataset.tf;els.tfTitle.textContent=tfName(state.tf);if(state.running)load()});
 els.symbol.onchange=()=>{if(state.running)load()};
-els.start.onclick=()=>{state.running=true;els.start.disabled=true;els.stop.disabled=false;els.dataStatus.textContent="CONNECTING TO DERIV…";connect()};
-els.stop.onclick=()=>{state.running=false;els.start.disabled=false;els.stop.disabled=true;els.dataStatus.textContent="ANALYSIS STOPPED";if(state.ws)try{state.ws.close()}catch{}state.ws=null};
+els.start.onclick=()=>{state.running=true;els.start.disabled=true;els.stop.disabled=false;setStatus("CONNECTING TO DERIV…");connect()};
+els.stop.onclick=()=>{state.running=false;state.connecting=false;if(state.reconnectTimer){clearTimeout(state.reconnectTimer);state.reconnectTimer=null}if(state.dataTimer)clearTimeout(state.dataTimer);els.start.disabled=false;els.stop.disabled=true;setStatus("ANALYSIS STOPPED");if(state.ws)try{state.ws.close()}catch{}state.ws=null};
 $("refresh").onclick=()=>{if(state.running)load()};window.addEventListener("resize",draw);setInterval(()=>{if(state.running&&state.ws?.readyState===1)send({ping:1})},30000);
